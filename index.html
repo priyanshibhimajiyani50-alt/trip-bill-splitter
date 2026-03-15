@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html ng-app="tripApp">
+
+<head>
+    <title>Trip Bill Splitter</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <script src="https://ajax.googleapis.com/ajax/libs/angularjs/1.8.2/angular.min.js"></script>
+    <link rel="stylesheet" href="style.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+
+<body ng-controller="TripController" ng-cloak>
+    <div class="main-container">
+
+        <!-- Trip Selection Bar -->
+        <div class="trip-bar glass">
+            <div class="trip-selector">
+                <select ng-model="currentTripId" ng-change="switchTrip(currentTripId)" class="trip-select">
+                    <option ng-repeat="(id, trip) in trips" value="{{id}}">{{trip.name}}</option>
+                </select>
+                <div class="trip-controls">
+                    <button class="btn-icon" title="Toggle Theme" ng-click="toggleTheme()">
+                        <svg ng-if="theme === 'light'" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></svg>
+                        <svg ng-if="theme === 'dark'" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></svg>
+                    </button>
+                    <button class="btn-icon" title="Rename Trip" ng-click="renameTrip()">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></svg>
+                    </button>
+                    <button class="btn-icon danger" title="Delete Trip" ng-click="deleteTrip(currentTripId)">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"></svg>
+                    </button>
+                </div>
+            </div>
+            <div class="trip-creator">
+                <input type="text" ng-model="tripNameInput" placeholder="New trip name..."
+                    ng-keyup="$event.keyCode == 13 && createNewTrip(tripNameInput)">
+                <button class="btn primary small" ng-click="createNewTrip(tripNameInput)">Create Trip</button>
+            </div>
+        </div>
+
+        <header>
+            <h1>{{currentTrip.name}}</h1>
+            <p class="subtitle">Expense sharing made simple.</p>
+        </header>
+
+        <div class="cards-layout">
+
+            <!-- Left Column -->
+            <div class="column">
+                <div class="card glass">
+                    <h3>Add Member</h3>
+                    <div class="input-group">
+                        <input type="text" ng-model="memberName" placeholder="Enter member name"
+                            ng-keyup="$event.keyCode == 13 && addMember()">
+                        <button class="btn primary" ng-click="addMember()">Add</button>
+                    </div>
+                    <div class="member-list" ng-if="currentTrip.members.length > 0">
+                        <span class="badge" ng-repeat="m in currentTrip.members">
+                            {{m}}
+                            <span class="badge-delete" ng-click="removeMember(m)">×</span>
+                        </span>
+                    </div>
+                </div>
+
+                <div class="card glass">
+                    <h3>Add Expense</h3>
+                    <div class="input-form">
+                        <input type="text" ng-model="newExpense.name" placeholder="Expense description"
+                            ng-disabled="currentTrip.members.length === 0">
+
+                        <div class="split-row">
+                            <select ng-model="newExpense.categoryId" ng-disabled="currentTrip.members.length === 0">
+                                <option ng-repeat="c in categories" value="{{c.id}}">{{c.name}}</option>
+                            </select>
+                        </div>
+
+                        <!-- Payers Section (Multiple) -->
+                        <div class="form-section">
+                            <label class="section-label">Who Paid?</label>
+                            <div class="payer-input-container">
+                                <div class="payer-row" ng-repeat="m in currentTrip.members">
+                                    <span class="payer-name">{{m}}</span>
+                                    <input type="number" ng-model="newExpense.payers[m]" placeholder="0"
+                                        class="small-input">
+                                </div>
+                            </div>
+                            <div class="total-indicator" ng-class="{'valid': getFormPayerTotal() > 0}">
+                                Total Paid: ₹{{getFormPayerTotal() | number:2}}
+                            </div>
+                        </div>
+
+                        <!-- Split Mode Section -->
+                        <div class="form-section">
+                            <div class="tabs">
+                                <button class="tab-btn" ng-class="{'active': newExpense.splitMode === 'equal'}"
+                                    ng-click="newExpense.splitMode = 'equal'">Split Equally</button>
+                                <button class="tab-btn" ng-class="{'active': newExpense.splitMode === 'exact'}"
+                                    ng-click="newExpense.splitMode = 'exact'">Exact Amounts</button>
+                            </div>
+
+                            <!-- Equal Split UI -->
+                            <div class="tab-content" ng-if="newExpense.splitMode === 'equal'">
+                                <label class="section-label">Split among:</label>
+                                <div class="checkbox-group">
+                                    <label class="checkbox-label" ng-repeat="m in currentTrip.members">
+                                        <input type="checkbox" ng-model="newExpense.involvedMembers[m]">
+                                        {{m}}
+                                    </label>
+                                </div>
+                            </div>
+
+                            <!-- Exact Split UI -->
+                            <div class="tab-content" ng-if="newExpense.splitMode === 'exact'">
+                                <label class="section-label">Enter exact bits:</label>
+                                <div class="payer-input-container">
+                                    <div class="payer-row" ng-repeat="m in currentTrip.members">
+                                        <span class="payer-name">{{m}}</span>
+                                        <input type="number" ng-model="newExpense.exactAmounts[m]" placeholder="0"
+                                            class="small-input">
+                                    </div>
+                                </div>
+                                <div class="total-indicator"
+                                    ng-class="{'valid': getFormSplitTotal() === getFormPayerTotal() && getFormSplitTotal() > 0, 'invalid': getFormSplitTotal() !== getFormPayerTotal()}">
+                                    Split Total: ₹{{getFormSplitTotal() | number:2}}
+                                    <span ng-if="getFormSplitTotal() !== getFormPayerTotal()" class="tiny-warn">(Must
+                                        match ₹{{getFormPayerTotal()}})</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <button class="btn primary" ng-click="addExpense()"
+                            ng-disabled="!newExpense.name || getFormPayerTotal() <= 0 || (newExpense.splitMode === 'exact' && getFormSplitTotal() !== getFormPayerTotal()) || currentTrip.members.length === 0">
+                            Add Expense
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column -->
+            <div class="column">
+                <!-- Settlements -->
+                <div class="card glass highlight-card">
+                    <h3>Settlements</h3>
+                    <div class="results-container"
+                        ng-if="currentTrip.members.length > 0 && currentTrip.expenses.length > 0">
+                        <div class="result-item" ng-repeat="r in results"
+                            ng-class="{'transaction': r.type === 'transaction', 'settled': r.type === 'settled'}">
+                            <div class="result-details" ng-if="r.type === 'transaction'">
+                                <span class="member-name pay-text">{{r.from}}</span>
+                                <span class="action-text">owes</span>
+                                <span class="member-name receive-text">{{r.to}}</span>
+                            </div>
+                            <div class="result-details empty-state" ng-if="r.type === 'settled'">
+                                <span class="action-text">{{r.text}}</span>
+                            </div>
+                            <span class="balance" ng-if="r.type === 'transaction'">₹{{r.amount}}</span>
+                        </div>
+                        <button class="btn outline copy-btn" ng-click="copySummary()">📋 Copy Summary</button>
+                    </div>
+
+                    <div class="empty-state"
+                        ng-if="currentTrip.members.length === 0 || currentTrip.expenses.length === 0">
+                        <p class="text-muted">No data to settle yet.</p>
+                    </div>
+                </div>
+
+                <!-- Spending Analytics -->
+                <div class="card glass" ng-if="categoryTotals.length > 0">
+                    <h3>Spending Breakdown</h3>
+                    <div class="analytics-list">
+                        <div class="analytics-item" ng-repeat="cat in categoryTotals">
+                            <div class="analytics-bar-bg">
+                                <div class="analytics-bar-fill"
+                                    ng-style="{'width': cat.percent + '%', 'background': 'var(--primary)'}"></div>
+                            </div>
+                            <div class="analytics-details">
+                                <span class="analytics-name">{{cat.category.name}}</span>
+                                <span class="analytics-amount">₹{{cat.amount | number:2}} ({{cat.percent}}%)</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- History -->
+                <div class="card glass" ng-if="currentTrip.expenses.length > 0">
+                    <h3>Expenses History</h3>
+                    <ul class="expense-list">
+                        <li ng-repeat="e in currentTrip.expenses | orderBy:'-date'" class="expense-item">
+                            <div class="expense-content">
+                                <div class="expense-details">
+                                    <span class="expense-name">{{e.name}}</span>
+                                    <span class="expense-payer">
+                                        Total ₹{{e.totalAmount | number:2}} • {{e.splitMode}} split
+                                    </span>
+                                    <span class="expense-involved">
+                                        <span ng-repeat="(m, amt) in e.payers" class="mini-payer">{{m}} (₹{{amt}})
+                                        </span>
+                                    </span>
+                                </div>
+                            </div>
+                            <button class="btn-icon delete-btn" title="Delete Expense"
+                                ng-click="removeExpense(e.id)">×</button>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+
+        </div>
+    </div>
+    <script src="app.js"></script>
+</body>
+
+</html>
