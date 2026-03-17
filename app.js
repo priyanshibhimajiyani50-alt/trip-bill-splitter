@@ -1,20 +1,153 @@
-var app = angular.module("tripApp", []);
+var app = angular.module("tripApp", ['ngRoute']);
 
-app.controller("TripController", function ($scope) {
+app.config(function($routeProvider) {
+    $routeProvider
+    .when("/login", {
+        templateUrl: "login.template.html"
+    })
+    .when("/register", {
+        templateUrl: "register.template.html"
+    })
+    .when("/dashboard", {
+        templateUrl: "dashboard.template.html"
+    })
+    .otherwise({
+        redirectTo: "/login"
+    });
+});
+
+app.controller("TripController", function ($scope, $location, $rootScope) {
 
     // --- Core Data Structures & Persistence ---
-    const STORAGE_KEY = 'tripBillSplitter_v2';
+    const STORAGE_PREFIX = 'tripBillSplitter_user_';
+    const USERS_KEY = 'tripBillSplitter_users';
+    const SESSION_KEY = 'tripBillSplitter_session';
 
     $scope.categories = [
-        { id: 'food', name: 'Food & Drink' },
-        { id: 'transport', name: 'Transport' },
-        { id: 'stay', name: 'Accommodation' },
-        { id: 'activities', name: 'Activities' },
-        { id: 'other', name: 'Other' }
+        { id: 'food', name: 'Food & Drink', icon: '🍲' },
+        { id: 'transport', name: 'Transport', icon: '🚕' },
+        { id: 'stay', name: 'Accommodation', icon: '🏨' },
+        { id: 'activities', name: 'Activities', icon: '🎪' },
+        { id: 'other', name: 'Other', icon: '📦' }
     ];
 
+    $scope.isLoggedIn = false;
+    $scope.currentUser = null;
+    $scope.formData = { 
+        memberName: '', 
+        tripNameInput: '',
+        authForm: { username: '', password: '' }
+    };
+
+    // Initial session check
+    const session = localStorage.getItem(SESSION_KEY);
+    if (session) {
+        $scope.isLoggedIn = true;
+        $scope.currentUser = session;
+        $scope.loadAllData();
+    }
+
+    // Route Guard
+    $rootScope.$on('$routeChangeStart', function(event, next, current) {
+        const session = localStorage.getItem(SESSION_KEY);
+        const isAuthPage = next && (next.templateUrl === "login.template.html" || next.templateUrl === "register.template.html");
+        console.log("Route change:", { to: next?.templateUrl, authenticated: !!session });
+        
+        if (!session) {
+            if (!isAuthPage) {
+                console.log("Unauthenticated: Redirecting to login");
+                $location.path("/login");
+            }
+        } else {
+            if (isAuthPage) {
+                console.log("Authenticated: Redirecting to dashboard");
+                $location.path("/dashboard");
+            }
+        }
+    });
+
+    $scope.login = function() {
+        console.log("Attempting login...");
+        let users = {};
+        try {
+            users = JSON.parse(localStorage.getItem(USERS_KEY) || '{}');
+        } catch (e) {
+            console.error("Error parsing users from local storage", e);
+        }
+        
+        const { username, password } = $scope.formData.authForm;
+        console.log("User:", username);
+
+        if (users[username] && users[username] === password) {
+            console.log("Login successful");
+            $scope.isLoggedIn = true;
+            $scope.currentUser = username;
+            localStorage.setItem(SESSION_KEY, username);
+            
+            $scope.migrateLegacyData(username);
+            $scope.loadAllData();
+            
+            $scope.formData.authForm = { username: '', password: '' };
+            $location.path("/dashboard");
+        } else {
+            console.warn("Login failed: Invalid credentials");
+            alert("Invalid username or password.");
+        }
+    };
+
+    $scope.migrateLegacyData = function(username) {
+        const legacyData = localStorage.getItem('tripBillSplitter_v2');
+        if (legacyData) {
+            const userStorageKey = STORAGE_PREFIX + username;
+            if (!localStorage.getItem(userStorageKey)) {
+                localStorage.setItem(userStorageKey, legacyData);
+                console.log("Migrated legacy data for:", username);
+            }
+        }
+    };
+
+    $scope.register = function() {
+        console.log("Attempting registration...");
+        let users = {};
+        try {
+            users = JSON.parse(localStorage.getItem(USERS_KEY) || '{}');
+        } catch (e) {
+            console.error("Error parsing users for registration", e);
+        }
+
+        const { username, password } = $scope.formData.authForm;
+
+        if (!username || !password) {
+            alert("Please fill in all fields");
+            return;
+        }
+
+        if (users[username]) {
+            console.warn("Registration failed: Username already exists");
+            alert("Username already exists");
+        } else {
+            users[username] = password;
+            localStorage.setItem(USERS_KEY, JSON.stringify(users));
+            console.log("Registration successful for:", username);
+            alert("Registration successful! Please login.");
+            $location.path("/login");
+        }
+    };
+
+    $scope.logout = function() {
+        localStorage.removeItem(SESSION_KEY);
+        $scope.isLoggedIn = false;
+        $scope.currentUser = null;
+        $scope.resetToDefault();
+        $location.path("/login");
+    };
+
     $scope.loadAllData = function() {
-        const savedData = localStorage.getItem(STORAGE_KEY);
+        if (!$scope.isLoggedIn) return;
+
+        const storageKey = STORAGE_PREFIX + $scope.currentUser;
+        const savedData = localStorage.getItem(storageKey);
+        
         if (savedData) {
             try {
                 const parsed = JSON.parse(savedData);
@@ -29,7 +162,7 @@ app.controller("TripController", function ($scope) {
             $scope.resetToDefault();
         }
 
-        document.documentElement.setAttribute('data-theme', $scope.theme);
+        document.documentElement.setAttribute('data-theme', $scope.theme || 'light');
 
         // If no trips exist, create a default one
         if (Object.keys($scope.trips).length === 0) {
@@ -45,23 +178,44 @@ app.controller("TripController", function ($scope) {
     $scope.resetToDefault = function() {
         $scope.trips = {};
         $scope.currentTripId = null;
+        $scope.currentTrip = null;
+        $scope.results = [];
+        $scope.categoryTotals = [];
+        $scope.newExpense = $scope.resetNewExpense();
+        $scope.formData.memberName = '';
+        $scope.formData.tripNameInput = '';
     };
 
     $scope.syncCurrentTripRef = function() {
         if ($scope.currentTripId && $scope.trips[$scope.currentTripId]) {
             $scope.currentTrip = $scope.trips[$scope.currentTripId];
+        } else {
+            const keys = Object.keys($scope.trips || {});
+            if (keys.length > 0) {
+                $scope.currentTripId = keys[0];
+                $scope.currentTrip = $scope.trips[$scope.currentTripId];
+            } else {
+                $scope.currentTripId = null;
+                $scope.currentTrip = null;
+            }
+        }
+
+        if ($scope.currentTrip) {
             $scope.newExpense = $scope.resetNewExpense();
             $scope.refreshMemberInvolvement();
         }
     };
 
     $scope.saveAllData = function() {
+        if (!$scope.isLoggedIn) return;
+
+        const storageKey = STORAGE_PREFIX + $scope.currentUser;
         const data = {
             trips: $scope.trips,
             currentTripId: $scope.currentTripId,
             theme: $scope.theme
         };
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        localStorage.setItem(storageKey, JSON.stringify(data));
         $scope.calculateSplit();
     };
 
@@ -84,7 +238,7 @@ app.controller("TripController", function ($scope) {
         };
         $scope.currentTripId = id;
         $scope.syncCurrentTripRef();
-        $scope.tripNameInput = "";
+        $scope.formData.tripNameInput = "";
         $scope.saveAllData();
     };
 
@@ -127,10 +281,10 @@ app.controller("TripController", function ($scope) {
             name: "",
             amount: 0,
             categoryId: $scope.categories[0].id,
-            splitMode: 'equal', // 'equal' or 'exact'
-            payers: {}, // { "MemberName": amount }
-            involvedMembers: {}, // Used for equal split: { "MemberName": true }
-            exactAmounts: {} // Used for exact split: { "MemberName": amount }
+            splitMode: 'equal', 
+            payers: {}, 
+            involvedMembers: {}, 
+            exactAmounts: {} 
         };
     };
 
@@ -143,7 +297,6 @@ app.controller("TripController", function ($scope) {
         });
     };
 
-    // Calculation for visual aid in the form
     $scope.getFormPayerTotal = function() {
         return Object.values($scope.newExpense.payers).reduce((a, b) => a + (Number(b) || 0), 0);
     };
@@ -159,18 +312,27 @@ app.controller("TripController", function ($scope) {
     // --- Member Actions ---
 
     $scope.addMember = function () {
-        if ($scope.memberName && !$scope.currentTrip.members.includes($scope.memberName)) {
-            $scope.currentTrip.members.push($scope.memberName);
-            $scope.memberName = "";
+        const name = ($scope.formData.memberName || "").trim();
+        if (name && !$scope.currentTrip.members.some(m => m.toLowerCase() === name.toLowerCase())) {
+            $scope.currentTrip.members.push(name);
+            $scope.formData.memberName = "";
             $scope.refreshMemberInvolvement();
             $scope.saveAllData();
+        } else if (name) {
+            alert("This member already exists.");
         }
     };
 
     $scope.removeMember = function(member) {
-        const isInvolved = $scope.currentTrip.expenses.some(e => 
-            e.payers[member] || e.involvedMembers.includes(member)
-        );
+        const isInvolved = ($scope.currentTrip.expenses || []).some(e => {
+            const paid = e.payers && e.payers[member] && Number(e.payers[member]) > 0;
+            const involved = (e.involved || []).some(i => {
+                if (typeof i === 'string') return i === member;
+                if (typeof i === 'object' && i !== null) return i.member === member;
+                return false;
+            });
+            return paid || involved;
+        });
         if (isInvolved) {
             alert(`Cannot remove ${member}. They are involved in existing expenses.`);
             return;
@@ -207,7 +369,6 @@ app.controller("TripController", function ($scope) {
                 return;
             }
         } else {
-            // Exact mode
             let splitTotal = 0;
             Object.keys($scope.newExpense.exactAmounts).forEach(m => {
                 const val = Number($scope.newExpense.exactAmounts[m]) || 0;
@@ -229,7 +390,7 @@ app.controller("TripController", function ($scope) {
             payers: payers,
             categoryId: $scope.newExpense.categoryId,
             splitMode: $scope.newExpense.splitMode,
-            involved: finalInvolved, // Array of strings (Equal) OR objects (Exact)
+            involved: finalInvolved,
             date: new Date().toISOString()
         });
 
@@ -253,12 +414,10 @@ app.controller("TripController", function ($scope) {
         $scope.categoryTotals = [];
         if (!$scope.currentTrip || $scope.currentTrip.members.length === 0) return;
 
-        // Analytics
         let catMap = {};
         $scope.categories.forEach(c => catMap[c.id] = 0);
         let grandTotal = 0;
 
-        // Financial Balances
         let balances = {};
         $scope.currentTrip.members.forEach(m => balances[m] = 0);
 
@@ -266,10 +425,8 @@ app.controller("TripController", function ($scope) {
             grandTotal += e.totalAmount;
             catMap[e.categoryId] = (catMap[e.categoryId] || 0) + e.totalAmount;
 
-            // Credits for payers
             Object.keys(e.payers).forEach(m => balances[m] += e.payers[m]);
 
-            // Debits for split
             if (e.splitMode === 'equal') {
                 const share = e.totalAmount / e.involved.length;
                 e.involved.forEach(m => balances[m] -= share);
@@ -278,7 +435,6 @@ app.controller("TripController", function ($scope) {
             }
         });
 
-        // Resolve Debts (Simplified settlement algorithm)
         let debtors = [];
         let creditors = [];
         $scope.currentTrip.members.forEach(m => {
@@ -290,6 +446,11 @@ app.controller("TripController", function ($scope) {
         let i = 0, j = 0;
         while (i < debtors.length && j < creditors.length) {
             let amt = Math.min(debtors[i].amount, creditors[j].amount);
+            if (amt < 0.01) {
+                if (debtors[i].amount < 0.01) i++;
+                if (j < creditors.length && creditors[j].amount < 0.01) j++;
+                continue;
+            }
             $scope.results.push({ from: debtors[i].member, to: creditors[j].member, amount: amt.toFixed(2), type: 'transaction' });
             debtors[i].amount -= amt;
             creditors[j].amount -= amt;
@@ -301,7 +462,6 @@ app.controller("TripController", function ($scope) {
             $scope.results.push({ type: 'settled', text: grandTotal > 0 ? "Everyone is settled up!" : "No expenses yet." });
         }
 
-        // Category breakdown assembly
         $scope.categoryTotals = $scope.categories
             .map(c => ({ category: c, amount: catMap[c.id], percent: grandTotal > 0 ? ((catMap[c.id] / grandTotal) * 100).toFixed(1) : 0 }))
             .filter(c => c.amount > 0)
@@ -322,6 +482,4 @@ app.controller("TripController", function ($scope) {
         $scope.categoryTotals.forEach(c => text += `${c.category.icon} ${c.category.name}: ₹${c.amount}\n`);
         navigator.clipboard.writeText(text).then(() => alert("Copied!"));
     };
-
-    $scope.loadAllData();
 });
